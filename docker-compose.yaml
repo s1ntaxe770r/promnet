@@ -23,11 +23,16 @@ services:
       - '--web.enable-lifecycle'
     ports:
       - 9090:9090
+    expose:
+      - 9090
     networks:
       - monitoring 
 
    promnet-exporter:
-      image: promnet-exporter
+      # image: promnet-exporter
+      build:
+        context: .
+        dockerfile: Dockerfile
       container_name: promnet-exporter
       expose:
         - 9817
