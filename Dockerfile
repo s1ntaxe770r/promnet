@@ -1,17 +1,18 @@
-FROM golang:1.20-buster as builder
+FROM golang:alpine as builder
+
 WORKDIR /app
-
-COPY go.* ./
+COPY ./go.mod .
 RUN go mod download
+RUN apk add --no-cache gcc musl-dev
 COPY . .
-RUN go mod tidy
-RUN go build -o exporter ./main.go
+RUN CGO_ENABLED=1 GOOS=linux  go build -o api
 
-# The Real container
-FROM ubuntu:20.04
-RUN apt-get update && apt-get install -y openssl ca-certificates
-RUN update-ca-certificates
-RUN apt-get install -y libssl-dev
-RUN rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/api /app/api
-CMD ["/app/exporter"]
+FROM alpine
+
+RUN apk add --no-cache ca-certificates
+
+COPY --from=builder /app/api /api
+
+EXPOSE 9187
+
+ENTRYPOINT ["/api"]
