@@ -5,7 +5,6 @@ go 1.20
 require (
 	github.com/charmbracelet/log v0.2.2
 	github.com/prometheus/client_golang v1.16.0
-	github.com/robfig/cron/v3 v3.0.1
 	github.com/showwin/speedtest-go v1.6.3
 )
 
