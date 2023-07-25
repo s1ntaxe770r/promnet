@@ -1,0 +1,8 @@
+global:
+  scrape_interval: 2s
+
+scrape_configs:
+  - job_name: "internet-stats"
+    scrape_interval: 5s
+    static_configs:
+      - targets: ["promnet-exporter:9817"]
