@@ -3,6 +3,7 @@ package exporter
 import (
 	"math"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/log"
@@ -37,49 +38,79 @@ var (
 	})
 
 	logger = log.NewWithOptions(os.Stderr, log.Options{
-		Prefix: "Baking 🍪 ",
+		Prefix: "SpeedExporter⚡️",
 	})
 )
 
 type Exporter struct {
-	log *log.Logger
+	log      *log.Logger
+	cacheMtx sync.RWMutex
+	cache    *speedTestResult
+}
+
+type speedTestResult struct {
+	Timestamp time.Time
+	Latency   float64
+	Download  float64
+	Upload    float64
 }
 
 func NewExporter() *Exporter {
 	return &Exporter{
-		log: logger,
+		log:   logger,
+		cache: &speedTestResult{},
 	}
 }
 
-// Describe implements prometheus.Collector.
 func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- downloadSpeed
 	ch <- uploadSpeed
 	ch <- latency
 }
 
-// Collect implements prometheus.Collector.
-
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
-	t := time.Now()
-	e.log.Info("Starting speed test", "time", t.Format("2006-01-02 15:04:05"))
+	// Check if cache is empty or it's been more than 5 minutes since the last test
+	if e.cache.Timestamp.IsZero() || time.Since(e.cache.Timestamp) > 5*time.Minute {
+		// If the cache is empty or expired, trigger a new speed test in a separate goroutine
+		go e.runSpeedTest()
+	}
+
+	// Read from cache
+	e.cacheMtx.RLock()
+	defer e.cacheMtx.RUnlock()
+
+	ch <- prometheus.MustNewConstMetric(latency, prometheus.GaugeValue, e.cache.Latency)
+	ch <- prometheus.MustNewConstMetric(downloadSpeed, prometheus.GaugeValue, e.cache.Download)
+	ch <- prometheus.MustNewConstMetric(uploadSpeed, prometheus.GaugeValue, e.cache.Upload)
+}
+
+func (e *Exporter) runSpeedTest() {
+	e.log.Info("Starting speed test")
 	serverList, err := speedTestClient.FetchServers()
 	if err != nil {
 		log.Error("Error fetching server list", err)
+		return
 	}
 	targets, _ := serverList.FindServer([]int{})
+
+	var latestResult speedTestResult
 
 	for _, s := range targets {
 		s.PingTest(nil)
 		s.DownloadTest()
 		s.UploadTest()
 
-		TestsConducted.Inc()
-
-		ch <- prometheus.MustNewConstMetric(latency, prometheus.GaugeValue, math.Round(float64(s.Latency/1000000)))
-		ch <- prometheus.MustNewConstMetric(downloadSpeed, prometheus.GaugeValue, math.Round(s.DLSpeed))
-		ch <- prometheus.MustNewConstMetric(uploadSpeed, prometheus.GaugeValue, math.Round(s.ULSpeed))
-
+		latestResult.Latency = math.Round(float64(s.Latency) / 1000000)
+		latestResult.Download = s.DLSpeed
+		latestResult.Upload = s.ULSpeed
 	}
-	log.Info("Speed test completed", "Last run took", time.Since(t))
+
+	latestResult.Timestamp = time.Now()
+
+	// Update the cache with the latest result
+	e.cacheMtx.Lock()
+	defer e.cacheMtx.Unlock()
+	e.cache = &latestResult
+
+	e.log.Info("Speed test completed", "Last run took", time.Since(latestResult.Timestamp))
 }
