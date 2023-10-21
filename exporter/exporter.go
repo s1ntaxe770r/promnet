@@ -15,22 +15,15 @@ import (
 var (
 	speedTestClient = speedtest.New()
 
-	latency = prometheus.NewDesc(
-		prometheus.BuildFQName("speedtest", "", "latency"),
-		"Internet latency",
-		nil, nil,
-	)
-
-	downloadSpeed = prometheus.NewDesc(
-		prometheus.BuildFQName("speedtest", "", "downloadSpeed"),
-		"Internet download speed",
-		nil, nil,
-	)
-	uploadSpeed = prometheus.NewDesc(
-		prometheus.BuildFQName("speedtest", "", "uploadSpeed"),
-		"Internet upload speed",
-		nil, nil,
-	)
+	latency = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "speedtest_latency",
+	})
+	downloadSpeed = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "speedtest_downloadSpeed",
+	})
+	uploadSpeed = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "speedtest_uploadSpeed",
+	})
 
 	TestsConducted = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "tests_conducted",
@@ -62,15 +55,17 @@ func NewExporter() *Exporter {
 	}
 }
 
+// IMPLEMTATION OF COLLECTOR INTERFACE
 func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
-	ch <- downloadSpeed
-	ch <- uploadSpeed
-	ch <- latency
+	ch <- latency.Desc()
+	ch <- downloadSpeed.Desc()
+	ch <- uploadSpeed.Desc()
 }
 
+// IMPLEMTATION OF COLLECT method
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	// Check if cache is empty or it's been more than 5 minutes since the last test
-	if e.cache.Timestamp.IsZero() || time.Since(e.cache.Timestamp) > 5*time.Minute {
+	if e.cache.Timestamp.IsZero() || time.Since(e.cache.Timestamp) > 4*time.Minute {
 		// If the cache is empty or expired, trigger a new speed test in a separate goroutine
 		go e.runSpeedTest()
 	}
@@ -79,9 +74,11 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	e.cacheMtx.RLock()
 	defer e.cacheMtx.RUnlock()
 
-	ch <- prometheus.MustNewConstMetric(latency, prometheus.GaugeValue, e.cache.Latency)
-	ch <- prometheus.MustNewConstMetric(downloadSpeed, prometheus.GaugeValue, e.cache.Download)
-	ch <- prometheus.MustNewConstMetric(uploadSpeed, prometheus.GaugeValue, e.cache.Upload)
+	// set the value of the metric to the value of the cache
+
+	ch <- prometheus.MustNewConstMetric(latency.Desc(), prometheus.GaugeValue, e.cache.Latency)
+	ch <- prometheus.MustNewConstMetric(downloadSpeed.Desc(), prometheus.GaugeValue, e.cache.Download)
+	ch <- prometheus.MustNewConstMetric(uploadSpeed.Desc(), prometheus.GaugeValue, e.cache.Upload)
 }
 
 func (e *Exporter) runSpeedTest() {
@@ -103,6 +100,11 @@ func (e *Exporter) runSpeedTest() {
 		latestResult.Latency = math.Round(float64(s.Latency) / 1000000)
 		latestResult.Download = s.DLSpeed
 		latestResult.Upload = s.ULSpeed
+
+		latency.Set(latestResult.Latency)
+		downloadSpeed.Set(latestResult.Download)
+		uploadSpeed.Set(latestResult.Upload)
+		TestsConducted.Inc()
 	}
 
 	latestResult.Timestamp = time.Now()
